@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard - Feestdagen</title>
+<style>
+  :root {
+    --bg: #f4f6f9;
+    --card: #ffffff;
+    --line: #e3e7ee;
+    --text: #1f2733;
+    --muted: #6b7585;
+    --accent: #2f6fed;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", system-ui, sans-serif;
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 40px 20px;
+  }
+  h1 { font-size: 1.4rem; margin-bottom: 24px; }
+
+  /* --- Dashboard kaart --- */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 22px 24px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .card-header h2 {
+    font-size: 1.05rem;
+    margin: 0;
+  }
+  .card-header .badge {
+    font-size: 0.75rem;
+    color: var(--accent);
+    background: #eaf0fe;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-weight: 600;
+  }
+
+  .holiday-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 10px 0;
+    border-top: 1px solid var(--line);
+  }
+  .holiday-row:first-of-type { border-top: none; }
+
+  .date-block {
+    flex-shrink: 0;
+    width: 56px;
+    text-align: center;
+    background: #f1f4fa;
+    border-radius: 8px;
+    padding: 6px 0;
+  }
+  .date-block .day { font-size: 1.2rem; font-weight: 700; line-height: 1; }
+  .date-block .month { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; }
+
+  .holiday-name { font-weight: 600; }
+  .holiday-meta { font-size: 0.8rem; color: var(--muted); }
+
+  .state-text {
+    color: var(--muted);
+    font-size: 0.9rem;
+    padding: 10px 0;
+  }
+  .state-text.error { color: #c2554b; }
+</style>
+</head>
+<body>
+
+  <h1>Dashboard</h1>
+
+  <!-- ===========================================================
+       Widget: "Eerstvolgende feestdag(en)"
+       Dit blok (de div met id="feestdagenWidget" + het script
+       onderaan) kun je als geheel overnemen in het bestaande
+       Dashboard van het urenregistratiesysteem.
+  =========================================================== -->
+  <div class="card" id="feestdagenWidget">
+    <div class="card-header">
+      <h2>Eerstvolgende feestdag(en)</h2>
+      <span class="badge">Nederland</span>
+    </div>
+    <div id="feestdagenInhoud">
+      <p class="state-text">Feestdagen worden geladen...</p>
+    </div>
+  </div>
+
+  <script>
+    /* ===========================================================
+       Haalt via de Nager.Date API de aankomende feestdagen in
+       Nederland op en toont de eerstvolgende datum (en eventuele
+       andere feestdagen die op dezelfde datum vallen) op het
+       Dashboard.
+
+       API: https://date.nager.at/Api
+       Endpoint: GET /api/v3/NextPublicHolidays/{countryCode}
+       Geeft de resterende feestdagen van het huidige jaar terug,
+       gesorteerd op datum (de eerste in de lijst is dus de
+       eerstvolgende).
+    =========================================================== */
+
+    const FEESTDAGEN_API_URL = "https://date.nager.at/api/v3/NextPublicHolidays/NL";
+    const inhoudEl = document.querySelector("#feestdagenInhoud");
+
+    const MAAND_NAMEN = [
+      "jan", "feb", "mrt", "apr", "mei", "jun",
+      "jul", "aug", "sep", "okt", "nov", "dec"
+    ];
+
+    // Maak van 1 feestdag-object een rij voor het dashboard
+    function maakFeestdagRow(feestdag) {
+      const datum = new Date(feestdag.date);
+
+      const row = document.createElement("div");
+      row.className = "holiday-row";
+      row.innerHTML = `
+        <div class="date-block">
+          <div class="day">${datum.getDate()}</div>
+          <div class="month">${MAAND_NAMEN[datum.getMonth()]}</div>
+        </div>
+        <div>
+          <div class="holiday-name">${feestdag.localName}</div>
+          <div class="holiday-meta">${verstrekenTekst(datum)}</div>
+        </div>
+      `;
+      return row;
+    }
+
+    // Geeft "vandaag", "morgen" of "over X dagen" terug
+    function verstrekenTekst(datum) {
+      const vandaag = new Date();
+      vandaag.setHours(0, 0, 0, 0);
+      datum.setHours(0, 0, 0, 0);
+
+      const dagenVerschil = Math.round((datum - vandaag) / 86400000);
+
+      if (dagenVerschil === 0) return "Vandaag";
+      if (dagenVerschil === 1) return "Morgen";
+      return `Over ${dagenVerschil} dagen`;
+    }
+
+    async function laadFeestdagen() {
+      try {
+        const response = await fetch(FEESTDAGEN_API_URL);
+
+        if (!response.ok) {
+          throw new Error("Netwerkrespons was niet ok");
+        }
+
+        const feestdagen = await response.json();
+
+        if (!feestdagen.length) {
+          inhoudEl.innerHTML = '<p class="state-text">Geen aankomende feestdagen gevonden voor dit jaar.</p>';
+          return;
+        }
+
+        // De API levert de feestdagen al gesorteerd op datum.
+        // De eerstvolgende datum kan op meerdere feestdagen vallen
+        // (zelden in NL, maar zo werkt het ook als dat wel zo is).
+        const eerstvolgendeDatum = feestdagen[0].date;
+        const eerstvolgendeFeestdagen = feestdagen.filter(
+          (feestdag) => feestdag.date === eerstvolgendeDatum
+        );
+
+        inhoudEl.innerHTML = "";
+        eerstvolgendeFeestdagen.forEach((feestdag) => {
+          inhoudEl.appendChild(maakFeestdagRow(feestdag));
+        });
+
+      } catch (fout) {
+        console.error("Kon feestdagen niet laden:", fout);
+        inhoudEl.innerHTML = '<p class="state-text error">Feestdagen konden niet worden geladen. Probeer het later opnieuw.</p>';
+      }
+    }
+
+    laadFeestdagen();
+  </script>
+</body>
+</html>
